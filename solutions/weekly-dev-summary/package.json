@@ -1,0 +1,9 @@
+{
+  "name": "n8n-weekly-dev-summary",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:workflow": "node scripts/build-workflow.mjs",
+    "test": "node --test"
+  }
+}
