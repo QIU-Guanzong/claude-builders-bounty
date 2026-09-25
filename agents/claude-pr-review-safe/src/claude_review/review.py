@@ -189,6 +189,7 @@ def _minimal_environment() -> dict[str, str]:
         "TMPDIR",
         "LANG",
         "LC_ALL",
+        "USER",
     )
     return {name: os.environ[name] for name in allowed if name in os.environ}
 

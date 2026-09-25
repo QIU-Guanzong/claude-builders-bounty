@@ -11,7 +11,7 @@ cd agents/claude-pr-review-safe
 python -m pip install .
 ```
 
-The package has no Python runtime dependencies. Claude Code uses the standard signed-in profile under your home directory. The subprocess does not inherit API keys or tokens, model/base-URL overrides, or an alternate Claude config path from the shell, preventing an unrelated environment setting from switching the review to a different account or API route. The CLI's API spend ceiling defaults to `$0.50`; change it with `--budget-usd`. Subscription quotas may apply separately.
+The package has no Python runtime dependencies. Claude Code uses the standard signed-in profile under your home directory. The subprocess preserves `USER` for local credential lookup but does not inherit API keys or tokens, model/base-URL overrides, or an alternate Claude config path from the shell, preventing an unrelated environment setting from switching the review to a different account or API route. The CLI's API spend ceiling defaults to `$0.50`; change it with `--budget-usd`. Subscription quotas may apply separately.
 
 ## Review a pull request
 

@@ -144,6 +144,32 @@ class ClaudeInvocationTests(unittest.TestCase):
                 )
         self.assertEqual(review.as_dict(), VALID_REVIEW)
 
+    def test_preserves_user_for_signed_in_credential_lookup(self):
+        with tempfile.TemporaryDirectory() as folder:
+            fake = Path(folder) / "claude"
+            fake.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, os\n"
+                "assert os.environ.get('USER') == 'review-user'\n"
+                f"print(json.dumps({{'structured_output': {json.dumps(VALID_REVIEW)}}}))\n",
+                encoding="utf-8",
+            )
+            fake.chmod(0o755)
+            with patch.dict(
+                os.environ,
+                {
+                    "HOME": folder,
+                    "PATH": os.environ.get("PATH", ""),
+                    "USER": "review-user",
+                },
+            ):
+                review = run_claude_review(
+                    "diff text",
+                    "https://github.com/example/repo/pull/4",
+                    claude_bin=str(fake),
+                )
+        self.assertEqual(review.as_dict(), VALID_REVIEW)
+
     def test_budget_is_bounded(self):
         with self.assertRaisesRegex(ReviewError, "Budget"):
             run_claude_review("diff", "local diff", budget_usd=20.01)
