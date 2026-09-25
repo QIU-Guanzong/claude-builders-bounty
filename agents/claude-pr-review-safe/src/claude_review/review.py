@@ -182,19 +182,13 @@ def _model_input(pr_url: str, diff: str) -> str:
 
 
 def _minimal_environment() -> dict[str, str]:
-    """Keep the child environment small while preserving supported auth variables."""
+    """Pass only basic process settings, not shell auth or routing overrides."""
     allowed = (
         "PATH",
         "HOME",
         "TMPDIR",
         "LANG",
         "LC_ALL",
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_AUTH_TOKEN",
-        "CLAUDE_CODE_OAUTH_TOKEN",
-        "ANTHROPIC_BASE_URL",
-        "ANTHROPIC_MODEL",
-        "CLAUDE_CONFIG_DIR",
     )
     return {name: os.environ[name] for name in allowed if name in os.environ}
 

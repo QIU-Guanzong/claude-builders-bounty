@@ -109,6 +109,41 @@ class ClaudeInvocationTests(unittest.TestCase):
                 )
         self.assertEqual(review.as_dict(), VALID_REVIEW)
 
+    def test_drops_auth_and_routing_environment_overrides(self):
+        auth_and_routing = {
+            "ANTHROPIC_API_KEY": "test-api-key",
+            "ANTHROPIC_AUTH_TOKEN": "test-auth-token",
+            "CLAUDE_CODE_OAUTH_TOKEN": "test-oauth-token",
+            "ANTHROPIC_BASE_URL": "https://gateway.invalid",
+            "ANTHROPIC_MODEL": "test-model",
+            "CLAUDE_CONFIG_DIR": "/tmp/alternate-claude-config",
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            fake = Path(folder) / "claude"
+            fake.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, os\n"
+                f"for name in {tuple(auth_and_routing)!r}:\n"
+                "    assert name not in os.environ\n"
+                f"print(json.dumps({{'structured_output': {json.dumps(VALID_REVIEW)}}}))\n",
+                encoding="utf-8",
+            )
+            fake.chmod(0o755)
+            with patch.dict(
+                os.environ,
+                {
+                    "HOME": folder,
+                    "PATH": os.environ.get("PATH", ""),
+                    **auth_and_routing,
+                },
+            ):
+                review = run_claude_review(
+                    "diff text",
+                    "https://github.com/example/repo/pull/4",
+                    claude_bin=str(fake),
+                )
+        self.assertEqual(review.as_dict(), VALID_REVIEW)
+
     def test_budget_is_bounded(self):
         with self.assertRaisesRegex(ReviewError, "Budget"):
             run_claude_review("diff", "local diff", budget_usd=20.01)

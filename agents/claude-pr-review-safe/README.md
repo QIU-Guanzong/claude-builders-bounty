@@ -11,7 +11,7 @@ cd agents/claude-pr-review-safe
 python -m pip install .
 ```
 
-The package has no Python runtime dependencies. Claude Code uses the user's existing sign-in. API calls are bounded by a default `$0.50` ceiling; change it with `--budget-usd`. Subscription quotas may apply separately.
+The package has no Python runtime dependencies. Claude Code uses the standard signed-in profile under your home directory. The subprocess does not inherit API keys or tokens, model/base-URL overrides, or an alternate Claude config path from the shell, preventing an unrelated environment setting from switching the review to a different account or API route. The CLI's API spend ceiling defaults to `$0.50`; change it with `--budget-usd`. Subscription quotas may apply separately.
 
 ## Review a pull request
 
@@ -40,6 +40,7 @@ The command asks for confirmation in the terminal before using the existing `gh`
 ## Guardrails
 
 - Claude Code runs in a temporary directory, receives only the PR URL and diff, has no tools or MCP servers enabled, and does not persist a session.
+- Authentication uses the standard Claude Code profile, not inherited API or gateway environment variables; the caller's selected sign-in and subscription limits still apply.
 - The diff is treated as untrusted input. Claude is told to ignore instructions embedded in code and to report only findings supported by changed lines.
 - Claude Code's structured-output schema is checked again locally before Markdown is rendered.
 - The model cannot read files, execute commands, change code, or post anything. GitHub posting is handled separately through `gh` and requires the explicit confirmation above.
