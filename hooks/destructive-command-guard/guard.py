@@ -16,6 +16,7 @@ from typing import NamedTuple
 BACKTICK = chr(96)
 SQL_CLIENTS = {"mysql", "mariadb", "psql", "sqlite3", "sqlcmd"}
 SHELLS = {"bash", "dash", "sh", "zsh"}
+ESCAPED_SEMICOLON = "\ue000"
 SHELL_PUNCTUATION = ";&|()<>\n"
 MAX_COMMAND_BYTES = 1_000_000
 MAX_NESTING = 16
@@ -96,8 +97,72 @@ def _heredoc_openers(line: str) -> list[tuple[str, bool, bool]]:
     return found
 
 
+def _normalize_shell_boundaries(command: str) -> str:
+    """Preserve command newlines while removing shell comments before shlex tokenizing."""
+    output: list[str] = []
+    quote: str | None = None
+    in_comment = False
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if in_comment:
+            if char == "\n":
+                output.append(";")
+                in_comment = False
+            index += 1
+            continue
+
+        if quote == "'":
+            output.append(char)
+            if char == "'":
+                quote = None
+            index += 1
+            continue
+
+        if quote == '"':
+            if char == "\\" and index + 1 < len(command):
+                if command[index + 1] != "\n":
+                    output.extend((char, command[index + 1]))
+                index += 2
+                continue
+            output.append(char)
+            if char == '"':
+                quote = None
+            index += 1
+            continue
+
+        if char == "\\" and index + 1 < len(command):
+            if command[index + 1] == ";":
+                output.append(ESCAPED_SEMICOLON)
+                index += 2
+                continue
+            if command[index + 1] != "\n":
+                output.extend((char, command[index + 1]))
+            index += 2
+            continue
+        if char in {"'", '"'}:
+            quote = char
+            output.append(char)
+        elif char == "#" and (
+            index == 0
+            or command[index - 1].isspace()
+            or command[index - 1] in ";&|()<>"
+        ):
+            in_comment = True
+        elif char == "\n":
+            output.append(";")
+        else:
+            output.append(char)
+        index += 1
+    return "".join(output)
+
+
 def _tokens(command: str) -> list[str]:
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=SHELL_PUNCTUATION)
+    lexer = shlex.shlex(
+        _normalize_shell_boundaries(command),
+        posix=True,
+        punctuation_chars=SHELL_PUNCTUATION,
+    )
     lexer.whitespace = " \t\r"
     lexer.whitespace_split = True
     return list(lexer)
@@ -500,6 +565,265 @@ def _git_push_reason(args: list[str]) -> str | None:
     return None
 
 
+def _unwrap_execution_prefix(argv: list[str]) -> list[str]:
+    """Unwrap common command launchers without treating arbitrary arguments as code."""
+    remaining = list(argv)
+    while remaining:
+        while remaining and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", remaining[0]):
+            remaining = remaining[1:]
+        if not remaining:
+            return []
+        executable = Path(remaining[0]).name
+        if executable == "env":
+            args = remaining[1:]
+            index = 0
+            while index < len(args):
+                arg = args[index]
+                if arg == "--":
+                    index += 1
+                    break
+                if arg in {"-u", "--unset", "-C", "--chdir"}:
+                    index += 2
+                    continue
+                if arg in {"-S", "--split-string"}:
+                    if index + 1 >= len(args):
+                        return []
+                    try:
+                        split = shlex.split(args[index + 1], posix=True)
+                    except ValueError:
+                        return []
+                    return _unwrap_execution_prefix(split + args[index + 2 :])
+                if arg.startswith(("--unset=", "--chdir=")) or (
+                    arg.startswith("-u") and len(arg) > 2
+                ):
+                    index += 1
+                    continue
+                if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", arg):
+                    index += 1
+                    continue
+                if arg.startswith("-"):
+                    index += 1
+                    continue
+                break
+            remaining = args[index:]
+            continue
+
+        if executable == "sudo":
+            args = remaining[1:]
+            index = 0
+            value_options = {
+                "-C",
+                "-D",
+                "-g",
+                "-h",
+                "-p",
+                "-r",
+                "-t",
+                "-u",
+                "--close-from",
+                "--chdir",
+                "--group",
+                "--host",
+                "--other-user",
+                "--prompt",
+                "--role",
+                "--type",
+                "--user",
+            }
+            while index < len(args):
+                arg = args[index]
+                if arg == "--":
+                    index += 1
+                    break
+                if arg in value_options:
+                    index += 2
+                elif arg.startswith("--") and "=" in arg:
+                    index += 1
+                elif arg.startswith("-"):
+                    index += 1
+                else:
+                    break
+            remaining = args[index:]
+            continue
+
+        if executable in {"command", "exec"}:
+            args = remaining[1:]
+            index = 0
+            while index < len(args):
+                arg = args[index]
+                if arg == "--":
+                    index += 1
+                    break
+                if executable == "exec" and arg == "-a":
+                    index += 2
+                elif arg.startswith("-"):
+                    index += 1
+                else:
+                    break
+            remaining = args[index:]
+            continue
+
+        if executable in {"nohup", "busybox"}:
+            remaining = remaining[1:]
+            continue
+
+        if executable == "time":
+            args = remaining[1:]
+            index = 0
+            while index < len(args) and args[index].startswith("-"):
+                arg = args[index]
+                if arg in {"-f", "--format", "-o", "--output"}:
+                    index += 2
+                else:
+                    index += 1
+            remaining = args[index:]
+            continue
+
+        if executable == "timeout":
+            args = remaining[1:]
+            index = 0
+            while index < len(args) and args[index].startswith("-"):
+                arg = args[index]
+                if arg in {"-k", "--kill-after", "-s", "--signal"}:
+                    index += 2
+                elif arg.startswith("--") and "=" in arg:
+                    index += 1
+                else:
+                    index += 1
+            if index < len(args):
+                index += 1  # duration
+            remaining = args[index:]
+            continue
+
+        if executable == "nice":
+            args = remaining[1:]
+            index = 0
+            while index < len(args) and args[index].startswith("-"):
+                arg = args[index]
+                if arg in {"-n", "--adjustment"}:
+                    index += 2
+                elif arg.startswith("--adjustment=") or (
+                    arg.startswith("-n") and len(arg) > 2
+                ):
+                    index += 1
+                elif re.fullmatch(r"-\d+", arg):
+                    index += 1
+                else:
+                    break
+            remaining = args[index:]
+            continue
+
+        if executable == "stdbuf":
+            args = remaining[1:]
+            index = 0
+            while index < len(args) and args[index].startswith("-"):
+                arg = args[index]
+                if arg in {"-i", "-o", "-e", "--input", "--output", "--error"}:
+                    index += 2
+                elif arg.startswith("--") and "=" in arg:
+                    index += 1
+                else:
+                    index += 1
+            remaining = args[index:]
+            continue
+
+        if executable == "xargs":
+            args = remaining[1:]
+            index = 0
+            value_options = {
+                "-a",
+                "-d",
+                "-E",
+                "-I",
+                "-L",
+                "-n",
+                "-P",
+                "-s",
+                "--arg-file",
+                "--delimiter",
+                "--eof",
+                "--max-args",
+                "--max-chars",
+                "--max-lines",
+                "--max-procs",
+                "--replace",
+            }
+            while index < len(args):
+                arg = args[index]
+                if arg == "--":
+                    index += 1
+                    break
+                if arg in value_options:
+                    index += 2
+                elif arg.startswith("--") and "=" in arg:
+                    index += 1
+                elif arg.startswith("-"):
+                    index += 1
+                else:
+                    break
+            remaining = args[index:]
+            continue
+
+        return remaining
+    return []
+
+
+def _find_exec_commands(argv: list[str]) -> list[list[str]]:
+    """Extract commands that find passes to -exec/-execdir/-ok actions."""
+    if not argv or Path(argv[0]).name != "find":
+        return []
+    commands: list[list[str]] = []
+    index = 1
+    actions = {"-exec", "-execdir", "-ok", "-okdir"}
+    while index < len(argv):
+        if argv[index] not in actions:
+            index += 1
+            continue
+        start = index + 1
+        end = start
+        while end < len(argv) and argv[end] not in {
+            ";",
+            "+",
+            ESCAPED_SEMICOLON,
+        }:
+            end += 1
+        if end > start:
+            commands.append(argv[start:end])
+        index = end + 1
+    return commands
+
+
+def _inspect_command_argv(argv: list[str], depth: int) -> str | None:
+    command = _unwrap_execution_prefix(argv)
+    if not command:
+        return None
+    first = Path(command[0]).name
+    if first == "rm":
+        reason = _rm_reason(command[1:])
+        if reason:
+            return reason
+    elif first == "git":
+        reason = _git_push_reason(command[1:])
+        if reason:
+            return reason
+    elif first in SQL_CLIENTS:
+        reason = _sql_from_segments([command], [])
+        if reason:
+            return reason
+    if first in SHELLS:
+        args = command[1:]
+        for index, arg in enumerate(args):
+            if arg == "-c" or (
+                arg.startswith("-") and not arg.startswith("--") and "c" in arg[1:]
+            ):
+                if index + 1 < len(args):
+                    return inspect(args[index + 1], depth + 1)
+                break
+    elif first == "eval":
+        return inspect(" ".join(command[1:]), depth + 1)
+    return None
+
+
 def _sql_from_segments(segments: list[list[str]], operators: list[str]) -> str | None:
     for segment in segments:
         if not segment:
@@ -594,31 +918,9 @@ def inspect(command: str, depth: int = 0) -> str | None:
     for segment in segments:
         if not segment:
             continue
-        for index, token in enumerate(segment):
-            name = Path(token).name
-            if name == "rm":
-                reason = _rm_reason(segment[index + 1 :])
-                if reason:
-                    return reason
-            elif name == "git":
-                reason = _git_push_reason(segment[index + 1 :])
-                if reason:
-                    return reason
-
-        first = Path(segment[0]).name
-        if first in SHELLS:
-            args = segment[1:]
-            for index, arg in enumerate(args):
-                if arg == "-c" or (
-                    arg.startswith("-") and not arg.startswith("--") and "c" in arg[1:]
-                ):
-                    if index + 1 < len(args):
-                        reason = inspect(args[index + 1], depth + 1)
-                        if reason:
-                            return reason
-                    break
-        elif first == "eval":
-            reason = inspect(" ".join(segment[1:]), depth + 1)
+        commands = [segment, *_find_exec_commands(segment)]
+        for argv in commands:
+            reason = _inspect_command_argv(argv, depth)
             if reason:
                 return reason
 

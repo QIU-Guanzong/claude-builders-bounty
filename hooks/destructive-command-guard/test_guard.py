@@ -63,6 +63,36 @@ class CommandInspectionTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertBlocked(command)
 
+    def test_command_wrappers_and_find_exec_are_inspected(self) -> None:
+        for command in (
+            "env sh -c 'rm -rf /tmp/build'",
+            "sudo sh -c 'rm -rf /tmp/build'",
+            "sudo env bash -lc 'git push --force origin main'",
+            "env -S \"sh -c 'rm -rf /tmp/build'\"",
+            "timeout 10s bash -c 'rm -rf /tmp/build'",
+            "xargs -I{} sh -c 'rm -rf /tmp/build'",
+            "find /tmp -maxdepth 0 -exec sh -c 'rm -rf /tmp/build' \\;",
+            "find . -exec echo safe \\; -exec rm -rf {} \\;",
+            "find /tmp -maxdepth 0 -execdir env sh -c 'DROP TABLE users' \\;",
+            "busybox sh -c 'TRUNCATE TABLE sessions'",
+            "time -p sh -c 'DELETE FROM users'",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+    def test_command_arguments_are_not_mistaken_for_executed_commands(self) -> None:
+        for command in (
+            "echo rm -rf /tmp/build",
+            "echo git push --force origin main",
+            "echo sh -c 'rm -rf /tmp/build'",
+            'echo "first line\nrm -rf /tmp/build"',
+            "xargs printf '%s' 'rm -rf /tmp/build'",
+            "find /tmp -maxdepth 0 -exec echo 'rm -rf /tmp/build' \\;",
+            "find . -exec echo safe \\; -exec echo rm -rf {} \\;",
+        ):
+            with self.subTest(command=command):
+                self.assertAllowed(command)
+
     def test_quoted_and_commented_substitutions_are_not_executed(self) -> None:
         single_quoted_backticks = (
             "echo '" + chr(96) + "rm -rf /tmp/build" + chr(96) + "'"

@@ -34,8 +34,11 @@ handling remains in control.
   options, simple producer-to-client pipes, or a SQL here-doc.
 - DROP TABLE, TRUNCATE, and a DELETE FROM lacking a top-level WHERE.
   Comments and quoted values do not count as a WHERE.
-- bash/sh/zsh/dash -c, eval, $() and backtick command substitutions, and
-  process substitutions. Quoted examples and shell comments are left alone.
+- bash/sh/zsh/dash -c, eval, $() and backtick command substitutions, process
+  substitutions, common launchers such as sudo/env/timeout/xargs, and commands
+  passed through find's -exec/-execdir/-ok actions. Quoted examples and shell
+  comments are left alone; command-like text passed to echo is not treated as
+  an executed command.
 
 Every blocked event appends a JSON line to ~/.claude/hooks/blocked.log with
 the UTC timestamp, full attempted command, and project_path provided by the
