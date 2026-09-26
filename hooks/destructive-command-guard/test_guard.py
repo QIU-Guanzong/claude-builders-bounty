@@ -130,6 +130,24 @@ class CommandInspectionTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertAllowed(command)
 
+    def test_force_refspec_after_option_terminator(self) -> None:
+        for command in (
+            "git push -- origin +HEAD:refs/heads/main",
+            "git -C repo push -- origin +main",
+            "env git push -- origin main +topic:topic",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+        for command in (
+            "git push -- origin main",
+            "git push -- origin HEAD:refs/heads/main",
+            "git push -- --force main",
+            "echo 'git push -- origin +main'",
+        ):
+            with self.subTest(command=command):
+                self.assertAllowed(command)
+
     def test_sql_destructive_statements_and_comments(self) -> None:
         for command in (
             "psql -c 'DROP TABLE users'",

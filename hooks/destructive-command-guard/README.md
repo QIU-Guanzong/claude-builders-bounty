@@ -30,7 +30,7 @@ handling remains in control.
   separated flags, long flags, absolute paths, sudo/env prefixes, and the
   -- option terminator.
 - git push with --force, -f, force-with-lease variants, force-if-includes,
-  or a + refspec; common git -C and git -c prefixes are handled.
+  or a + refspec (including after --); common git -C and git -c prefixes are handled.
 - SQL sent with common psql, mysql, mariadb, sqlite3, and sqlcmd command
   options, simple producer-to-client pipes, a SQL here-doc, or a here-string.
 - DROP TABLE, TRUNCATE, and a DELETE FROM lacking a top-level WHERE.

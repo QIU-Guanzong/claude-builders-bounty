@@ -555,15 +555,18 @@ def _git_push_reason(args: list[str]) -> str | None:
             rest.pop(0)
     if not rest or rest[0] != "push":
         return None
+    options_ended = False
     for arg in rest[1:]:
-        if arg == "--":
-            break
-        if (
+        if arg == "--" and not options_ended:
+            options_ended = True
+            continue
+        forced_option = not options_ended and (
             arg in {"--force", "--force-with-lease", "--force-if-includes"}
             or arg.startswith("--force-with-lease=")
             or (arg.startswith("-") and not arg.startswith("--") and "f" in arg[1:])
-            or arg.startswith("+")
-        ):
+        )
+        # The option terminator does not remove the force meaning of a + refspec.
+        if forced_option or arg.startswith("+"):
             return "git push requests a forced remote update."
     return None
 
