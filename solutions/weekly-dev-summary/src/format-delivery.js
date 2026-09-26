@@ -1,7 +1,7 @@
 const settings = $('Build Settings').first().json;
-const output = String($json.stdout || $json.output || '').trim();
-if (!output) throw new Error('Claude Code returned an empty summary');
-const summary = output.slice(0, 1800);
+const summary = String($json.summary || '').trim();
+if (!summary) throw new Error('Cannot deliver an empty summary');
+if (summary.length > 1800) throw new Error('Summary exceeds the delivery limit');
 const url = settings.webhookUrl;
 
 if (settings.sendDelivery) {

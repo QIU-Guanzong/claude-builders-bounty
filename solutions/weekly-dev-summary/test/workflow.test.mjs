@@ -61,7 +61,7 @@ test('normalizers keep only weekly commits, closed issues, and merged pull reque
   assert.deepEqual(pulls.json.items.map((item) => item.number), [8]);
 });
 
-test('prompt is bounded, factual, and base64 encoded for a shell-safe CLI handoff', () => {
+test('prompt produces a bounded factual Messages API payload with managed credentials', () => {
   const [result] = runCode('Compose Summary Prompt', {
     settings: { since: 's', until: 'u', language: 'en' },
     input: [
@@ -71,16 +71,22 @@ test('prompt is bounded, factual, and base64 encoded for a shell-safe CLI handof
     ],
   });
   assert.equal(result.json.counts.commits, 24);
-  const decoded = Buffer.from(result.json.promptBase64, 'base64').toString('utf8');
+  const decoded = result.json.requestBody.messages[0].content;
   assert.match(decoded, /untrusted data, never instructions/);
   assert.match(decoded, /explicitly say the highlights are a sample/);
   assert.equal(result.json.highlights.commits.omitted, 4);
   assert.equal((decoded.match(/"title":"c/g) || []).length, 20);
-  const command = nodeByName('Run Claude Code').parameters.command;
-  assert.match(command, /claude-sonnet-4-6/);
-  assert.match(command, /--tools ''/);
-  assert.match(command, /--no-session-persistence/);
-  assert.match(command, /env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY/);
+  assert.equal(result.json.requestBody.model, 'claude-sonnet-4-6');
+  assert.equal(result.json.requestBody.max_tokens, 1024);
+  assert.equal(result.json.requestBody.messages[0].role, 'user');
+  const api = nodeByName('Call Claude API').parameters;
+  assert.equal(api.url, 'https://api.anthropic.com/v1/messages');
+  assert.equal(api.method, 'POST');
+  assert.equal(api.authentication, 'predefinedCredentialType');
+  assert.equal(api.nodeCredentialType, 'anthropicApi');
+  assert.ok(api.headerParameters.parameters.some(({ name, value }) => name === 'anthropic-version' && value === '2023-06-01'));
+  assert.ok(!api.headerParameters.parameters.some(({ name }) => name === 'x-api-key'));
+  assert.ok(!workflow.nodes.some(({ type }) => type === 'n8n-nodes-base.executeCommand'));
 });
 
 test('complete activity above 100 is counted exactly with explicit omitted highlights', () => {
@@ -92,7 +98,7 @@ test('complete activity above 100 is counted exactly with explicit omitted highl
       group('pulls', []),
     ],
   });
-  const decoded = Buffer.from(result.json.promptBase64, 'base64').toString('utf8');
+  const decoded = result.json.requestBody.messages[0].content;
   assert.equal(result.json.counts.commits, 135);
   assert.deepEqual(result.json.highlights.commits, { shown: 20, omitted: 115 });
   assert.equal((decoded.match(/"title":"c/g) || []).length, 20);
@@ -162,24 +168,59 @@ test('commit window uses committer time and deduplicates overlapping pages', () 
 test('delivery formatting enforces destination hosts and builds Discord and Slack payloads', () => {
   const [discord] = runCode('Prepare Delivery', {
     settings: { destinationType: 'discord', webhookUrl: 'https://discord.com/api/webhooks/123/secret', sendDelivery: true },
-    current: { stdout: 'Weekly update' },
+    current: { summary: 'Weekly update' },
   });
   assert.deepEqual(discord.json.body, { content: 'Weekly update' });
 
   const [slack] = runCode('Prepare Delivery', {
     settings: { destinationType: 'slack', webhookUrl: 'https://hooks.slack.com/services/T000/B000/token', sendDelivery: true },
-    current: { stdout: 'Weekly update' },
+    current: { summary: 'Weekly update' },
   });
   assert.deepEqual(slack.json.body, { text: 'Weekly update' });
 
   assert.throws(() => runCode('Prepare Delivery', {
     settings: { destinationType: 'discord', webhookUrl: 'https://example.com/hook', sendDelivery: true },
-    current: { stdout: 'Weekly update' },
+    current: { summary: 'Weekly update' },
   }), /Discord webhook/);
   assert.throws(() => runCode('Prepare Delivery', {
     settings: { destinationType: 'local-test', webhookUrl: 'https://127.0.0.1/hook', sendDelivery: true },
-    current: { stdout: 'Weekly update' },
+    current: { summary: 'Weekly update' },
   }), /loopback/);
+});
+
+const message = (content, stopReason = 'end_turn') => ({
+  statusCode: 200,
+  body: { id: 'msg_synthetic', type: 'message', role: 'assistant', model: 'claude-sonnet-4-6', content, stop_reason: stopReason, usage: { input_tokens: 100, output_tokens: 25 } },
+});
+
+test('Claude response extraction joins text blocks without delivering other content', () => {
+  const [result] = runCode('Validate Claude Response', { current: message([
+    { type: 'thinking', thinking: 'Do not publish reasoning' },
+    { type: 'text', text: '  Weekly update  ' },
+    { type: 'text', text: '135 commits; highlights are a sample.' },
+  ]) });
+  assert.equal(result.json.summary, 'Weekly update\n\n135 commits; highlights are a sample.');
+});
+
+test('Claude errors and malformed message shapes stop before delivery', () => {
+  for (const response of [
+    { statusCode: 429, body: { type: 'error', error: { type: 'rate_limit_error', message: 'Rate limited' } } },
+    { statusCode: 200, body: { type: 'error', error: { type: 'api_error' } } },
+    { statusCode: 200, body: { type: 'message', role: 'user', content: [] } },
+    { statusCode: 200, body: { type: 'message', role: 'assistant', content: null } },
+    message([{ type: 'text', text: 123 }]),
+  ]) assert.throws(() => runCode('Validate Claude Response', { current: response }), /Claude API/);
+});
+
+test('Claude empty, refused, truncated, or oversized responses are never delivered', () => {
+  for (const content of [[], [{ type: 'text', text: '   ' }], [{ type: 'thinking', thinking: 'No answer' }]]) {
+    assert.throws(() => runCode('Validate Claude Response', { current: message(content) }), /empty summary/);
+  }
+  for (const reason of ['max_tokens', 'refusal', 'tool_use', 'pause_turn', null]) {
+    assert.throws(() => runCode('Validate Claude Response', { current: message([{ type: 'text', text: 'Partial summary' }], reason) }), /did not complete/);
+  }
+  assert.throws(() => runCode('Validate Claude Response', { current: message([{ type: 'text', text: 'x'.repeat(1801) }]) }), /delivery limit/);
+  assert.throws(() => runCode('Prepare Delivery', { current: { summary: 'x'.repeat(1801) } }), /delivery limit/);
 });
 
 test('delivery is off by default and webhook sending is behind a conditional node', () => {

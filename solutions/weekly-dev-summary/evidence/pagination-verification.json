@@ -1,7 +1,7 @@
 {
-  "checkedAt": "2026-09-26T06:07:07.462Z",
+  "checkedAt": "2026-09-26T06:16:19.435Z",
   "environment": "real isolated n8n CLI; synthetic loopback GitHub responses",
-  "provider": "mocked deterministic command; no inference",
+  "provider": "real n8n Messages HTTP node against a synthetic loopback endpoint; no inference or real credentials",
   "delivery": "disabled; no external webhook",
   "counts": {
     "commits": 135,
@@ -39,10 +39,16 @@
       "omitted": 115
     }
   },
-  "requests": {
+  "requestsPerRun": {
     "commits": 2,
     "issues": 2,
     "pulls": 2
+  },
+  "apiChecks": {
+    "success": "POST body/header mapping and multiple text-block extraction passed; delivery disabled",
+    "error": "Workflow stopped before delivery",
+    "empty": "Workflow stopped before delivery",
+    "truncated": "Workflow stopped before delivery"
   },
   "assertions": "135 weekly entries per category; complete Link pagination; old/unmerged/PR-as-issue exclusions; PR weekly-cutoff stops before page 3"
 }

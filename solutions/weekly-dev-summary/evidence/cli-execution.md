@@ -1,4 +1,6 @@
-# Real n8n CLI execution
+# Historical n8n execution with Claude Code — September 25
+
+This receipt and its generated summary describe the earlier CLI-based workflow. The current workflow uses a direct Anthropic Messages API request instead; neither this receipt nor its screenshot verifies that new API path. The earlier one-page counts below are preserved as captured and are not complete weekly totals. Current pagination and API mapping are covered separately by the synthetic local verification receipt.
 
 - Runtime: n8n 2.40.7, Node.js 26.9.0 (self-hosted, local CLI).
 - Test workflow: `bounty5realtest04`; source workflow imported through n8n CLI into an isolated local data folder.

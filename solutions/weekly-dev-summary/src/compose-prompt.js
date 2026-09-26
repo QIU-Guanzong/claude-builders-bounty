@@ -29,4 +29,14 @@ const prompt = [
   JSON.stringify(details),
 ].join('\n\n');
 
-return [{ json: { ...settings, promptBase64: Buffer.from(prompt, 'utf8').toString('base64'), counts: details.counts, coverage: details.coverage, highlights: details.highlights } }];
+return [{ json: {
+  ...settings,
+  requestBody: {
+    model: 'claude-sonnet-4-6',
+    max_tokens: 1024,
+    messages: [{ role: 'user', content: prompt }],
+  },
+  counts: details.counts,
+  coverage: details.coverage,
+  highlights: details.highlights,
+} }];

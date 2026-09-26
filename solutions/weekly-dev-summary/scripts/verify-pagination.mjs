@@ -13,6 +13,8 @@ const sandbox = await mkdtemp(resolve(tmpdir(), 'n8n-pagination-'));
 const inRange = new Date(Date.now() - 4 * 86400000).toISOString();
 const outside = new Date(Date.now() - 14 * 86400000).toISOString();
 const requests = { commits: 0, issues: 0, pulls: 0 };
+let apiScenario = 'success';
+const apiRequests = [];
 const commit = (i) => ({ sha: `sha${i}`, commit: { author: { date: inRange }, committer: { date: inRange }, message: `Commit ${i}` } });
 const issue = (i) => ({ number: i, title: `Issue ${i}`, state: 'closed', closed_at: inRange });
 const pull = (i) => ({ number: i, title: `PR ${i}`, merged_at: inRange, updated_at: inRange });
@@ -24,6 +26,23 @@ const data = {
 let base;
 const server = createServer((request, response) => {
   const url = new URL(request.url, base);
+  if (url.pathname === '/v1/messages') {
+    let body = '';
+    request.on('data', (chunk) => { body += chunk; });
+    request.on('end', () => {
+      const payload = JSON.parse(body);
+      const facts = JSON.parse(payload.messages[0].content.split('\n\n').at(-1));
+      apiRequests.push({ scenario: apiScenario, method: request.method, version: request.headers['anthropic-version'], payload, facts });
+      const error = apiScenario === 'error';
+      const result = error
+        ? { type: 'error', error: { type: 'rate_limit_error', message: 'Synthetic rate limit' } }
+        : { id: 'msg_synthetic', type: 'message', role: 'assistant', model: payload.model,
+          content: apiScenario === 'empty' ? [] : [{ type: 'text', text: 'Synthetic weekly summary.' }, { type: 'text', text: '135 commits, 135 closed issues, 135 merged PRs. Highlights are a sample.' }],
+          stop_reason: apiScenario === 'truncated' ? 'max_tokens' : 'end_turn', usage: { input_tokens: 100, output_tokens: 35 } };
+      response.writeHead(error ? 429 : 200, { 'content-type': 'application/json' }).end(JSON.stringify(result));
+    });
+    return;
+  }
   const kind = url.pathname.split('/').pop();
   if (!(kind in data)) { response.writeHead(404).end(); return; }
   requests[kind] += 1;
@@ -44,17 +63,17 @@ const env = {
   N8N_DIAGNOSTICS_ENABLED: 'false',
   N8N_VERSION_NOTIFICATIONS_ENABLED: 'false',
   N8N_COMMUNITY_PACKAGES_ENABLED: 'false',
-  NODES_EXCLUDE: '["n8n-nodes-base.localFileTrigger"]',
+  NODES_EXCLUDE: '["n8n-nodes-base.localFileTrigger","n8n-nodes-base.executeCommand"]',
   N8N_RUNNERS_ENABLED: 'false',
 };
-async function run(args) {
+async function run(args, allowFailure = false) {
   return new Promise((done, reject) => {
     const child = spawn(n8n, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '';
     child.stdout.on('data', (chunk) => { stdout += chunk; });
     child.stderr.on('data', (chunk) => { stderr += chunk; });
     child.on('error', reject);
-    child.on('exit', (code) => code === 0 ? done(stdout) : reject(new Error(`n8n ${args[0]} exited ${code}: ${stderr}\n${stdout}`)));
+    child.on('exit', (code) => (code === 0 || allowFailure) ? done({ stdout, stderr, code }) : reject(new Error(`n8n ${args[0]} exited ${code}: ${stderr}\n${stdout}`)));
   });
 }
 try {
@@ -62,14 +81,16 @@ try {
   for (const [name, kind] of [['Get Commits', 'commits'], ['Get Closed Issues', 'issues'], ['Get Pull Requests', 'pulls']]) {
     workflow.nodes.find((node) => node.name === name).parameters.url = `${base}/${kind}?page=1`;
   }
-  // This command emits a deterministic placeholder from the real generated
-  // prompt. No Claude executable, account, API, or external webhook is invoked.
-  workflow.nodes.find((node) => node.name === 'Run Claude Code').parameters.command =
-    '=node -e "const prompt=Buffer.from(process.argv[1], \'base64\').toString(\'utf8\'); const facts=JSON.parse(prompt.split(\'\\n\\n\').at(-1)); console.log(JSON.stringify({counts:facts.counts,highlights:facts.highlights}));" \'{{$json.promptBase64}}\'';
+  // Keep the actual Messages HTTP mapping and parser. Only replace the URL
+  // and remove authentication for the local fixture; no API key is needed.
+  const api = workflow.nodes.find((node) => node.name === 'Call Claude API');
+  api.parameters.url = `${base}/v1/messages`;
+  api.parameters.authentication = 'none';
+  delete api.parameters.nodeCredentialType;
   const fixture = resolve(sandbox, 'workflow.json');
   await writeFile(fixture, JSON.stringify(workflow));
   await run(['import:workflow', `--input=${fixture}`]);
-  const output = await run(['execute', `--id=${workflow.id}`, '--rawOutput']);
+  const { stdout: output } = await run(['execute', `--id=${workflow.id}`, '--rawOutput']);
   const begin = output.search(/^\{/m);
   if (begin < 0) throw new Error(`No execution result: ${output.slice(-2000)}`);
   const execution = JSON.parse(output.slice(begin));
@@ -79,12 +100,33 @@ try {
   assert.deepEqual(requests, { commits: 2, issues: 2, pulls: 2 });
   for (const coverage of Object.values(prompt.coverage)) assert.equal(coverage.complete, true);
   for (const highlights of Object.values(prompt.highlights)) assert.deepEqual(highlights, { shown: 20, omitted: 115 });
+  const runData = execution.data.resultData.runData;
+  const delivery = runData['Prepare Delivery'][0].data.main[0][0].json;
+  assert.equal(delivery.summary, 'Synthetic weekly summary.\n\n135 commits, 135 closed issues, 135 merged PRs. Highlights are a sample.');
+  assert.equal(delivery.sendDelivery, false);
+  assert.ok(!runData['Post to Webhook']);
+  assert.equal(apiRequests[0].method, 'POST');
+  assert.equal(apiRequests[0].version, '2023-06-01');
+  assert.equal(apiRequests[0].payload.model, 'claude-sonnet-4-6');
+  assert.equal(apiRequests[0].payload.max_tokens, 1024);
+  assert.deepEqual(apiRequests[0].facts.counts, prompt.counts);
+  const apiChecks = { success: 'POST body/header mapping and multiple text-block extraction passed; delivery disabled' };
+  for (const [scenario, expectedError] of [['error', /429|rate limit|Too Many Requests/i], ['empty', /empty summary/], ['truncated', /did not complete the summary/]]) {
+    apiScenario = scenario;
+    const result = await run(['execute', `--id=${workflow.id}`, '--rawOutput'], true);
+    assert.notEqual(result.code, 0);
+    assert.match(result.stdout + result.stderr, expectedError);
+    apiChecks[scenario] = 'Workflow stopped before delivery';
+  }
+  assert.equal(apiRequests.length, 4);
   const receipt = {
     checkedAt: new Date().toISOString(),
     environment: 'real isolated n8n CLI; synthetic loopback GitHub responses',
-    provider: 'mocked deterministic command; no inference',
+    provider: 'real n8n Messages HTTP node against a synthetic loopback endpoint; no inference or real credentials',
     delivery: 'disabled; no external webhook',
-    counts: prompt.counts, coverage: prompt.coverage, highlights: prompt.highlights, requests,
+    counts: prompt.counts, coverage: prompt.coverage, highlights: prompt.highlights,
+    requestsPerRun: Object.fromEntries(Object.entries(requests).map(([kind, count]) => [kind, count / 4])),
+    apiChecks,
     assertions: '135 weekly entries per category; complete Link pagination; old/unmerged/PR-as-issue exclusions; PR weekly-cutoff stops before page 3',
   };
   await mkdir(resolve(root, 'evidence'), { recursive: true });

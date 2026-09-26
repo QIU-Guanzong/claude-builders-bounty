@@ -6,7 +6,7 @@ const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const read = (name) => readFile(resolve(root, name), 'utf8');
 const code = Object.fromEntries(await Promise.all([
   'build-settings', 'normalize-commits', 'normalize-issues', 'normalize-pulls',
-  'compose-prompt', 'format-delivery',
+  'compose-prompt', 'validate-response', 'format-delivery',
 ].map(async (name) => [name, await read(`src/${name}.js`)])));
 const activityPages = await read('src/activity-pages.js');
 for (const name of ['normalize-commits', 'normalize-issues', 'normalize-pulls']) {
@@ -67,15 +67,21 @@ const nodes = [
   node('Join Commits and Issues', 'n8n-nodes-base.merge', 3.2, [1360, 180], { mode: 'append', numberInputs: 2 }),
   node('Join All Activity', 'n8n-nodes-base.merge', 3.2, [1540, 320], { mode: 'append', numberInputs: 2 }),
   node('Compose Summary Prompt', 'n8n-nodes-base.code', 2, [1720, 320], { mode: 'runOnceForAllItems', jsCode: code['compose-prompt'] }),
-  node('Run Claude Code', 'n8n-nodes-base.executeCommand', 1, [1940, 320], {
-    command: `=node -e "process.stdout.write(Buffer.from(process.argv[1], 'base64').toString('utf8'))" '{{$json.promptBase64}}' | env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY claude --model claude-sonnet-4-6 -p --tools '' --no-session-persistence --max-turns 1 --output-format text`,
+  node('Call Claude API', 'n8n-nodes-base.httpRequest', 4.2, [1940, 320], {
+    method: 'POST', url: 'https://api.anthropic.com/v1/messages',
+    authentication: 'predefinedCredentialType', nodeCredentialType: 'anthropicApi',
+    sendHeaders: true,
+    headerParameters: { parameters: [{ name: 'anthropic-version', value: '2023-06-01' }] },
+    sendBody: true, contentType: 'json', specifyBody: 'json', jsonBody: '={{$json.requestBody}}',
+    options: { timeout: 120000, response: { response: { responseFormat: 'json', fullResponse: true } } },
   }),
-  node('Prepare Delivery', 'n8n-nodes-base.code', 2, [2160, 320], { mode: 'runOnceForAllItems', jsCode: code['format-delivery'] }),
-  node('Send Delivery?', 'n8n-nodes-base.if', 2.2, [2380, 320], {
+  node('Validate Claude Response', 'n8n-nodes-base.code', 2, [2160, 320], { mode: 'runOnceForAllItems', jsCode: code['validate-response'] }),
+  node('Prepare Delivery', 'n8n-nodes-base.code', 2, [2380, 320], { mode: 'runOnceForAllItems', jsCode: code['format-delivery'] }),
+  node('Send Delivery?', 'n8n-nodes-base.if', 2.2, [2600, 320], {
     conditions: { options: { caseSensitive: true, leftValue: '', typeValidation: 'strict', version: 2 }, conditions: [{ id: 'send-delivery', leftValue: '={{$json.sendDelivery}}', rightValue: true, operator: { type: 'boolean', operation: 'equals' } }], combinator: 'and' },
     options: {},
   }),
-  node('Post to Webhook', 'n8n-nodes-base.httpRequest', 4.2, [2600, 220], {
+  node('Post to Webhook', 'n8n-nodes-base.httpRequest', 4.2, [2820, 220], {
     method: 'POST', url: '={{$json.webhookUrl}}', sendBody: true, contentType: 'json', specifyBody: 'json', jsonBody: '={{$json.body}}',
     options: { response: { response: { responseFormat: 'json' } } },
   }),
@@ -98,8 +104,9 @@ const connections = {
   'Join Commits and Issues': { main: [[{ node: 'Join All Activity', type: 'main', index: 0 }]] },
   'Normalize Pull Requests': { main: [[{ node: 'Join All Activity', type: 'main', index: 1 }]] },
   'Join All Activity': { main: [[{ node: 'Compose Summary Prompt', type: 'main', index: 0 }]] },
-  'Compose Summary Prompt': { main: [[{ node: 'Run Claude Code', type: 'main', index: 0 }]] },
-  'Run Claude Code': { main: [[{ node: 'Prepare Delivery', type: 'main', index: 0 }]] },
+  'Compose Summary Prompt': { main: [[{ node: 'Call Claude API', type: 'main', index: 0 }]] },
+  'Call Claude API': { main: [[{ node: 'Validate Claude Response', type: 'main', index: 0 }]] },
+  'Validate Claude Response': { main: [[{ node: 'Prepare Delivery', type: 'main', index: 0 }]] },
   'Prepare Delivery': { main: [[{ node: 'Send Delivery?', type: 'main', index: 0 }]] },
   'Send Delivery?': { main: [[{ node: 'Post to Webhook', type: 'main', index: 0 }], []] },
 };
