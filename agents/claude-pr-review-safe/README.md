@@ -42,7 +42,7 @@ The command asks for confirmation in the terminal before using the existing `gh`
 - Claude Code runs the `pr-diff-reviewer` agent in a temporary directory, receives only the PR URL and diff, has no tools or MCP servers enabled, and does not persist a session.
 - Authentication uses the standard Claude Code profile, not inherited API or gateway environment variables; the caller's selected sign-in and subscription limits still apply.
 - The diff is treated as untrusted input. Claude is told to ignore instructions embedded in code and to report only findings supported by changed lines.
-- Claude Code's structured-output schema is checked again locally before Markdown is rendered.
+- Claude Code's structured-output schema is checked again locally before Markdown is rendered. The CLI unwraps a JSON code fence when one is returned, then rejects any object that does not match the exact review contract.
 - The model cannot read files, execute commands, change code, or post anything. GitHub posting is handled separately through `gh` and requires the explicit confirmation above.
 - A review is advisory. Its confidence label describes coverage of the supplied diff; it is not a test result or a merge recommendation.
 

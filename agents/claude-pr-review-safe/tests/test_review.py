@@ -43,6 +43,27 @@ class StructuredReviewTests(unittest.TestCase):
         response = json.dumps({"result": json.dumps(VALID_REVIEW)})
         self.assertEqual(extract_structured_output(response).as_dict(), VALID_REVIEW)
 
+    def test_extracts_fenced_json_result_from_cli(self):
+        response = json.dumps({"result": f"```json\n{json.dumps(VALID_REVIEW)}\n```"})
+        self.assertEqual(extract_structured_output(response).as_dict(), VALID_REVIEW)
+
+    def test_rejects_live_cli_output_that_uses_a_different_contract(self):
+        incompatible = {
+            "summary": "A one-string summary.",
+            "findings": [
+                {
+                    "title": "Unexpected key",
+                    "severity": "high",
+                    "location": "src/review.py:1",
+                    "description": "This output does not match our public review format.",
+                }
+            ],
+            "confidence": "Medium-High",
+        }
+        response = json.dumps({"result": f"```json\n{json.dumps(incompatible)}\n```"})
+        with self.assertRaisesRegex(ReviewError, "unexpected review shape"):
+            extract_structured_output(response)
+
     def test_rejects_invalid_contract(self):
         invalid = dict(VALID_REVIEW, confidence="Certain")
         with self.assertRaisesRegex(ReviewError, "Confidence"):
@@ -97,6 +118,8 @@ class ClaudeInvocationTests(unittest.TestCase):
                 "    agent = json.load(source)['pr-diff-reviewer']\n"
                 "assert agent['tools'] == []\n"
                 "assert 'untrusted code' in agent['prompt']\n"
+                "assert '\\\"summary\\\":[\\\"sentence 1\\\",\\\"sentence 2\\\"]' in agent['prompt']\n"
+                "assert '\\\"risks\\\"' in agent['prompt'] and '\\\"findings\\\"' not in agent['prompt']\n"
                 "assert sys.argv[sys.argv.index('--tools') + 1] == ''\n"
                 "assert '--no-session-persistence' in sys.argv\n"
                 "assert '--strict-mcp-config' in sys.argv\n"
