@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "build:workflow": "node scripts/build-workflow.mjs",
+    "render:verification-report": "node scripts/render-verification-report.mjs",
     "test": "node --test",
     "verify:pagination": "node scripts/verify-pagination.mjs"
   }
