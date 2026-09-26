@@ -4,7 +4,7 @@ A small CLI that reads a public GitHub pull request diff and asks Claude Code fo
 
 ## Install
 
-Requirements: Python 3.10+, GitHub CLI (`gh`) only if you want to post, and an installed, authenticated Claude Code CLI.
+Requirements: Python 3.10+, a Claude Code CLI that supports `--agents` and `--agent`, and GitHub CLI (`gh`) only if you want to post. The review runs through a named Claude Code agent with no tools or MCP servers enabled.
 
 ```sh
 cd agents/claude-pr-review-safe
@@ -39,7 +39,7 @@ The command asks for confirmation in the terminal before using the existing `gh`
 
 ## Guardrails
 
-- Claude Code runs in a temporary directory, receives only the PR URL and diff, has no tools or MCP servers enabled, and does not persist a session.
+- Claude Code runs the `pr-diff-reviewer` agent in a temporary directory, receives only the PR URL and diff, has no tools or MCP servers enabled, and does not persist a session.
 - Authentication uses the standard Claude Code profile, not inherited API or gateway environment variables; the caller's selected sign-in and subscription limits still apply.
 - The diff is treated as untrusted input. Claude is told to ignore instructions embedded in code and to report only findings supported by changed lines.
 - Claude Code's structured-output schema is checked again locally before Markdown is rendered.
