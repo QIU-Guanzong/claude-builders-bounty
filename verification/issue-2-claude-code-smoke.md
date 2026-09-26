@@ -49,3 +49,7 @@ Claude Code read the actual package manifest and project files, reported that on
 No app source or migration was changed and no dependency installation or database operation was performed; this is a context-understanding smoke test, not implementation validation. Claude Code wrote its normal plan artifact under the local Claude plans directory; the response is preserved in [`issue-2-claude-code-smoke-output.md`](issue-2-claude-code-smoke-output.md), with its local destination omitted.
 
 One initial run stopped at the explicit four-turn limit before returning a complete answer. The recorded successful run raised the limit to twelve turns; no second model retry was made after that successful response.
+
+## Fresh CLI check on 2026-09-27
+
+Claude Code 2.1.283 repeated the read-only comprehension check on a newly generated `create-next-app@15.5.26` fixture. It returned a successful end-turn response in 15 turns, read the project guide and real stub files, and asked no question. The exact prompt, output, settings, and scope limits are recorded in [the dated run record](issue-2-claude-code-smoke-20260927.md). This was planning only; no install, build, test, migration, or implementation was performed.
