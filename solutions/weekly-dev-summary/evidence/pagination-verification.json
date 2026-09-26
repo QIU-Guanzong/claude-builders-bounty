@@ -1,0 +1,48 @@
+{
+  "checkedAt": "2026-09-26T06:07:07.462Z",
+  "environment": "real isolated n8n CLI; synthetic loopback GitHub responses",
+  "provider": "mocked deterministic command; no inference",
+  "delivery": "disabled; no external webhook",
+  "counts": {
+    "commits": 135,
+    "closedIssues": 135,
+    "mergedPullRequests": 135
+  },
+  "coverage": {
+    "commits": {
+      "pages": 2,
+      "fetched": 136,
+      "complete": true
+    },
+    "issues": {
+      "pages": 2,
+      "fetched": 165,
+      "complete": true
+    },
+    "pulls": {
+      "pages": 2,
+      "fetched": 146,
+      "complete": true
+    }
+  },
+  "highlights": {
+    "commits": {
+      "shown": 20,
+      "omitted": 115
+    },
+    "closedIssues": {
+      "shown": 20,
+      "omitted": 115
+    },
+    "mergedPullRequests": {
+      "shown": 20,
+      "omitted": 115
+    }
+  },
+  "requests": {
+    "commits": 2,
+    "issues": 2,
+    "pulls": 2
+  },
+  "assertions": "135 weekly entries per category; complete Link pagination; old/unmerged/PR-as-issue exclusions; PR weekly-cutoff stops before page 3"
+}

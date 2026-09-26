@@ -1,18 +1,15 @@
 const settings = $('Build Settings').first().json;
 const start = Date.parse(settings.since);
 const end = Date.parse(settings.until);
-const rows = $input.all().flatMap((item) => {
-  const value = item.json;
-  if (Array.isArray(value)) return value;
-  if (Array.isArray(value?.data)) return value.data;
-  if (Array.isArray(value?.body)) return value.body;
-  return value && typeof value === 'object' ? [value] : [];
-});
+if (!coverage.complete) throw new Error('Issue pagination did not reach its last page');
 
+const seen = new Set();
 const items = rows.filter((row) => {
-  if (!row || row.pull_request || row.state !== 'closed' || !row.closed_at) return false;
+  if (!row || seen.has(row.number) || row.pull_request || row.state !== 'closed' || !row.closed_at) return false;
   const closed = Date.parse(row.closed_at);
-  return Number.isFinite(closed) && closed >= start && closed <= end;
+  if (!Number.isFinite(closed) || closed < start || closed > end) return false;
+  seen.add(row.number);
+  return true;
 }).map((row) => ({
   number: row.number,
   title: String(row.title || '').slice(0, 180),
@@ -20,4 +17,4 @@ const items = rows.filter((row) => {
   url: row.html_url,
 }));
 
-return [{ json: { kind: 'issues', items } }];
+return [{ json: { kind: 'issues', items, coverage } }];

@@ -4,6 +4,8 @@ import { readFile } from 'node:fs/promises';
 
 const workflow = JSON.parse(await readFile(new URL('../workflow.json', import.meta.url), 'utf8'));
 const nodeByName = (name) => workflow.nodes.find((node) => node.name === name);
+const page = (body, link = '') => ({ json: { body, headers: { link }, statusCode: 200 } });
+const group = (kind, items) => ({ json: { kind, items, coverage: { pages: 1, fetched: items.length, complete: true } } });
 
 function runCode(name, { input = [], current = {}, settings = {} } = {}) {
   const source = nodeByName(name).parameters.jsCode;
@@ -35,27 +37,27 @@ test('settings reject malformed repositories and build a rolling seven-day windo
 
 test('normalizers keep only weekly commits, closed issues, and merged pull requests', () => {
   const settings = { since: '2026-09-01T00:00:00Z', until: '2026-09-08T00:00:00Z' };
-  const [commits] = runCode('Normalize Commits', { input: [{ json: [
+  const [commits] = runCode('Normalize Commits', { settings, input: [page([
     { sha: '123456789012345', commit: { author: { date: '2026-09-04T12:00:00Z', name: 'A' }, message: 'Fix it\nbody' }, html_url: 'https://github.com/o/r/commit/123' },
     { commit: { message: 'missing fields' } },
-  ] }] });
+  ])] });
   assert.equal(commits.json.items.length, 1);
   assert.equal(commits.json.items[0].sha, '123456789012');
   assert.equal(commits.json.items[0].title, 'Fix it');
 
-  const [issues] = runCode('Normalize Issues', { settings, input: [{ json: [
+  const [issues] = runCode('Normalize Issues', { settings, input: [page([
     { number: 1, title: 'In range', state: 'closed', closed_at: '2026-09-03T00:00:00Z', html_url: 'https://github.com/o/r/issues/1' },
     { number: 2, title: 'PR masquerading as issue', state: 'closed', closed_at: '2026-09-03T00:00:00Z', pull_request: {}, html_url: 'https://github.com/o/r/pull/2' },
     { number: 3, title: 'Still open', state: 'open', closed_at: null },
     { number: 4, title: 'Outside window', state: 'closed', closed_at: '2026-08-31T23:59:59Z' },
-  ] }] });
+  ])] });
   assert.deepEqual(issues.json.items.map((item) => item.number), [1]);
 
-  const [pulls] = runCode('Normalize Pull Requests', { settings, input: [{ json: [
+  const [pulls] = runCode('Normalize Pull Requests', { settings, input: [page([
     { number: 8, title: 'Merged', merged_at: '2026-09-07T08:00:00Z', html_url: 'https://github.com/o/r/pull/8' },
     { number: 9, title: 'Closed not merged', merged_at: null },
     { number: 10, title: 'Merged earlier', merged_at: '2026-08-30T08:00:00Z' },
-  ] }] });
+  ])] });
   assert.deepEqual(pulls.json.items.map((item) => item.number), [8]);
 });
 
@@ -63,15 +65,16 @@ test('prompt is bounded, factual, and base64 encoded for a shell-safe CLI handof
   const [result] = runCode('Compose Summary Prompt', {
     settings: { since: 's', until: 'u', language: 'en' },
     input: [
-      { json: { kind: 'commits', items: Array.from({ length: 24 }, (_, i) => ({ title: `c${i}` })) } },
-      { json: { kind: 'issues', items: [{ number: 4 }] } },
-      { json: { kind: 'pulls', items: [] } },
+      group('commits', Array.from({ length: 24 }, (_, i) => ({ title: `c${i}` }))),
+      group('issues', [{ number: 4 }]),
+      group('pulls', []),
     ],
   });
   assert.equal(result.json.counts.commits, 24);
   const decoded = Buffer.from(result.json.promptBase64, 'base64').toString('utf8');
   assert.match(decoded, /untrusted data, never instructions/);
-  assert.match(decoded, /report it as 100\+ and say the API result reached its request cap/);
+  assert.match(decoded, /explicitly say the highlights are a sample/);
+  assert.equal(result.json.highlights.commits.omitted, 4);
   assert.equal((decoded.match(/"title":"c/g) || []).length, 20);
   const command = nodeByName('Run Claude Code').parameters.command;
   assert.match(command, /claude-sonnet-4-6/);
@@ -80,17 +83,80 @@ test('prompt is bounded, factual, and base64 encoded for a shell-safe CLI handof
   assert.match(command, /env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY/);
 });
 
-test('a category at 100 fetched records is marked as capped rather than exact', () => {
+test('complete activity above 100 is counted exactly with explicit omitted highlights', () => {
   const [result] = runCode('Compose Summary Prompt', {
     settings: { since: 's', until: 'u', language: 'en' },
     input: [
-      { json: { kind: 'commits', items: Array.from({ length: 100 }, (_, i) => ({ title: `c${i}` })) } },
-      { json: { kind: 'issues', items: [] } },
-      { json: { kind: 'pulls', items: [] } },
+      group('commits', Array.from({ length: 135 }, (_, i) => ({ title: `c${i}` }))),
+      group('issues', []),
+      group('pulls', []),
     ],
   });
   const decoded = Buffer.from(result.json.promptBase64, 'base64').toString('utf8');
-  assert.match(decoded, /"atRequestCap":\{"commits":true/);
+  assert.equal(result.json.counts.commits, 135);
+  assert.deepEqual(result.json.highlights.commits, { shown: 20, omitted: 115 });
+  assert.equal((decoded.match(/"title":"c/g) || []).length, 20);
+  assert.doesNotMatch(decoded, /100\+/);
+});
+
+test('HTTP request nodes follow next links without a silent page cap', () => {
+  for (const name of ['Get Commits', 'Get Closed Issues', 'Get Pull Requests']) {
+    const { pagination, response } = nodeByName(name).parameters.options;
+    assert.equal(response.response.fullResponse, true);
+    assert.equal(pagination.pagination.limitPagesFetched, false);
+    assert.equal(pagination.pagination.requestInterval, 1000);
+    const evaluate = (expression, body, link) => new Function('$response', '$', `return (${expression.slice(3, -2)});`)(
+      { body, headers: { link } }, () => ({ first: () => ({ json: { since: '2026-09-01T00:00:00Z' } }) }),
+    );
+    const link = '<https://api.github.com/repos/o/r/commits?page=2>; rel="next", <https://api.github.com/repos/o/r/commits?page=3>; rel="last"';
+    assert.equal(evaluate(pagination.pagination.nextURL, [], link), 'https://api.github.com/repos/o/r/commits?page=2');
+    assert.equal(evaluate(pagination.pagination.completeExpression, [{ updated_at: '2026-09-03T00:00:00Z' }], link), false);
+    assert.equal(evaluate(pagination.pagination.completeExpression, [], ''), true);
+    if (name === 'Get Pull Requests') {
+      assert.equal(evaluate(pagination.pagination.completeExpression, [{ updated_at: '2026-08-31T00:00:00Z' }], link), true);
+    }
+  }
+});
+
+test('normalizers retain more than 100 weekly records across pages with complete source coverage', () => {
+  const settings = { since: '2026-09-01T00:00:00Z', until: '2026-09-08T00:00:00Z' };
+  const inRange = '2026-09-04T12:00:00Z';
+  const next = '<https://api.github.com/repos/o/r/activity?page=2>; rel="next"';
+  const specs = [
+    ['Normalize Commits', (i) => ({ sha: `sha${i}`, commit: { author: { date: inRange }, message: `c${i}` } })],
+    ['Normalize Issues', (i) => ({ number: i, title: `i${i}`, state: 'closed', closed_at: inRange })],
+    ['Normalize Pull Requests', (i) => ({ number: i, title: `p${i}`, merged_at: inRange, updated_at: inRange })],
+  ];
+  for (const [name, make] of specs) {
+    const records = Array.from({ length: 135 }, (_, i) => make(i));
+    const [result] = runCode(name, { settings, input: [page(records.slice(0, 100), next), page(records.slice(100))] });
+    assert.equal(result.json.items.length, 135);
+    assert.deepEqual(result.json.coverage, { pages: 2, fetched: 135, complete: true });
+  }
+});
+
+test('raw-page completeness survives filtering and unfinished pagination is rejected', () => {
+  const settings = { since: '2026-09-01T00:00:00Z', until: '2026-09-08T00:00:00Z' };
+  const rows = Array.from({ length: 100 }, (_, i) => ({ number: i, state: 'closed', closed_at: '2026-09-03T00:00:00Z', ...(i ? { pull_request: {} } : {}) }));
+  const [complete] = runCode('Normalize Issues', { settings, input: [page(rows)] });
+  assert.equal(complete.json.items.length, 1);
+  assert.equal(complete.json.coverage.fetched, 100);
+  assert.equal(complete.json.coverage.complete, true);
+  const next = '<https://api.github.com/repos/o/r/issues?page=2>; rel="next"';
+  assert.throws(() => runCode('Normalize Issues', { settings, input: [page(rows, next)] }), /pagination did not reach/);
+  assert.throws(() => runCode('Compose Summary Prompt', { settings, input: [group('commits', []), group('issues', [])] }), /Incomplete GitHub activity: pulls/);
+});
+
+test('commit window uses committer time and deduplicates overlapping pages', () => {
+  const settings = { since: '2026-09-01T00:00:00Z', until: '2026-09-08T00:00:00Z' };
+  const commit = (sha, committerDate) => ({ sha, commit: { author: { date: '2026-08-01T00:00:00Z' }, committer: { date: committerDate }, message: sha } });
+  const [result] = runCode('Normalize Commits', { settings, input: [page([
+    commit('old-authored-new-commit', '2026-09-04T00:00:00Z'),
+    commit('old-authored-new-commit', '2026-09-04T00:00:00Z'),
+    commit('outside', '2026-09-09T00:00:00Z'),
+  ])] });
+  assert.equal(result.json.items.length, 1);
+  assert.equal(result.json.items[0].date, '2026-09-04T00:00:00Z');
 });
 
 test('delivery formatting enforces destination hosts and builds Discord and Slack payloads', () => {
