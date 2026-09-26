@@ -4,7 +4,8 @@ A Python 3.10+ standard-library PreToolUse hook for Claude Code's Bash tool. It
 blocks recursive force deletion, forced Git pushes, DROP TABLE, TRUNCATE,
 and DELETE FROM statements without a real top-level WHERE clause. It inspects
 simple shell sequences, command substitutions, process substitutions, wrappers,
-and common here-doc input without executing the submitted command.
+here-strings to shell and SQL clients, and common here-doc input without
+executing the submitted command.
 
 ## Install
 
@@ -31,7 +32,7 @@ handling remains in control.
 - git push with --force, -f, force-with-lease variants, force-if-includes,
   or a + refspec; common git -C and git -c prefixes are handled.
 - SQL sent with common psql, mysql, mariadb, sqlite3, and sqlcmd command
-  options, simple producer-to-client pipes, or a SQL here-doc.
+  options, simple producer-to-client pipes, a SQL here-doc, or a here-string.
 - DROP TABLE, TRUNCATE, and a DELETE FROM lacking a top-level WHERE.
   Comments and quoted values do not count as a WHERE.
 - bash/sh/zsh/dash -c, eval, $() and backtick command substitutions, process

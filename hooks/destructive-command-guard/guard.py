@@ -183,6 +183,9 @@ def _segments_and_operators(command: str) -> tuple[list[list[str]], list[str]]:
             "shell quoting is incomplete; command cannot be inspected"
         ) from exc
     for word in words:
+        if word == "<<<":
+            current.append(word)
+            continue
         if word and all(char in SHELL_PUNCTUATION for char in word):
             if current:
                 segments.append(current)
@@ -793,6 +796,55 @@ def _find_exec_commands(argv: list[str]) -> list[list[str]]:
     return commands
 
 
+def _here_string_sources(args: list[str]) -> list[str]:
+    sources: list[str] = []
+    index = 0
+    while index < len(args):
+        if args[index] == "<<<" and index + 1 < len(args):
+            sources.append(args[index + 1])
+            index += 2
+        else:
+            index += 1
+    return sources
+
+
+def _shell_reads_stdin_as_script(args: list[str]) -> bool:
+    """Return whether a shell invocation uses stdin as its script source."""
+    without_here_strings: list[str] = []
+    index = 0
+    while index < len(args):
+        if args[index] == "<<<":
+            index += 2
+        else:
+            without_here_strings.append(args[index])
+            index += 1
+
+    index = 0
+    while index < len(without_here_strings):
+        arg = without_here_strings[index]
+        if arg in {"-c", "--command"} or (
+            arg.startswith("-") and not arg.startswith("--") and "c" in arg[1:]
+        ):
+            return False
+        if arg == "-s":
+            index += 1
+            continue
+        if arg in {"--rcfile", "--init-file", "-o", "+o", "-O", "+O"}:
+            index += 2
+            continue
+        if arg == "--":
+            if index + 1 < len(without_here_strings):
+                return without_here_strings[index + 1] in {"-", "/dev/stdin"}
+            return True
+        if arg in {"-", "/dev/stdin"}:
+            return True
+        if arg.startswith("-"):
+            index += 1
+            continue
+        return False
+    return True
+
+
 def _inspect_command_argv(argv: list[str], depth: int) -> str | None:
     command = _unwrap_execution_prefix(argv)
     if not command:
@@ -810,8 +862,19 @@ def _inspect_command_argv(argv: list[str], depth: int) -> str | None:
         reason = _sql_from_segments([command], [])
         if reason:
             return reason
+        if Path(argv[0]).name != "xargs":
+            for index, arg in enumerate(command[:-1]):
+                if arg == "<<<":
+                    reason = _sql_reason(command[index + 1])
+                    if reason:
+                        return reason
     if first in SHELLS:
         args = command[1:]
+        if _shell_reads_stdin_as_script(args):
+            for source in _here_string_sources(args):
+                reason = inspect(source, depth + 1)
+                if reason:
+                    return reason
         for index, arg in enumerate(args):
             if arg == "-c" or (
                 arg.startswith("-") and not arg.startswith("--") and "c" in arg[1:]

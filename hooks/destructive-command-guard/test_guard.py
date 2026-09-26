@@ -164,6 +164,28 @@ class CommandInspectionTests(unittest.TestCase):
         self.assertAllowed("echo 'DELETE FROM users' && psql -c 'SELECT 1'")
         self.assertBlocked("echo ok # <<END\nrm -rf /tmp/build\n")
 
+    def test_shell_and_sql_here_strings(self) -> None:
+        for command in (
+            "bash <<< 'rm -rf /tmp/build'",
+            "sh -s <<< 'git push --force origin main'",
+            "psql <<< 'DELETE FROM users'",
+            "mysql <<< 'TRUNCATE TABLE sessions'",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+        for command in (
+            "bash <<< 'echo safe'",
+            "bash -c 'echo safe' <<< 'rm -rf /tmp/build'",
+            "bash script.sh <<< 'rm -rf /tmp/build'",
+            "bash <<< 'rm -rf /tmp/build' script.sh",
+            "psql <<< 'DELETE FROM users WHERE id = 1'",
+            "psql <<< 'SELECT 1'",
+            "echo <<< 'rm -rf /tmp/build'",
+        ):
+            with self.subTest(command=command):
+                self.assertAllowed(command)
+
     def test_quoted_sql_literals_and_non_sql_commands_remain_allowed(self) -> None:
         for command in (
             "psql -c \"SELECT 'DROP TABLE users'\"",
