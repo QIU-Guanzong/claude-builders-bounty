@@ -1,6 +1,5 @@
 # Claude Code greenfield comprehension check
 
-- Submission project `started_at`: `2026-09-28` (first project contribution commit `2287e38` at `2026-09-28T00:02:01+08:00`; PR #4568 was created at `2026-09-28T00:02:57+08:00`).
 - Fresh test fixture `started_at`: `2026-09-28`.
 - Verification run: `2026-09-28` (Asia/Shanghai).
 - Fixture: fresh TypeScript App Router scaffold from `create-next-app@15.5.26`; the template was copied unchanged to its root.
