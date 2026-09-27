@@ -37,8 +37,9 @@ handling remains in control.
   Comments and quoted values do not count as a WHERE.
 - bash/sh/zsh/dash -c, eval, $() and backtick command substitutions, process
   substitutions, common launchers such as sudo/env/timeout/xargs, and commands
-  passed through find's -exec/-execdir/-ok actions. Quoted examples and shell
-  comments are left alone; command-like text passed to echo is not treated as
+  passed through find's -exec/-execdir/-ok actions. The env split-string option
+  accepts separate, --split-string=value, and attached -Svalue forms. Quoted
+  examples and shell comments are left alone; command-like text passed to echo is not treated as
   an executed command.
 
 Every blocked event appends a JSON line to ~/.claude/hooks/blocked.log with

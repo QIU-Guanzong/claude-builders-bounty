@@ -591,14 +591,24 @@ def _unwrap_execution_prefix(argv: list[str]) -> list[str]:
                 if arg in {"-u", "--unset", "-C", "--chdir"}:
                     index += 2
                     continue
-                if arg in {"-S", "--split-string"}:
-                    if index + 1 >= len(args):
-                        return []
+                if (
+                    arg in {"-S", "--split-string"}
+                    or arg.startswith("--split-string=")
+                    or (arg.startswith("-S") and len(arg) > 2)
+                ):
+                    if arg in {"-S", "--split-string"}:
+                        if index + 1 >= len(args):
+                            return []
+                        source, consumed = args[index + 1], 2
+                    elif arg.startswith("--split-string="):
+                        source, consumed = arg.partition("=")[2], 1
+                    else:
+                        source, consumed = arg[2:], 1
                     try:
-                        split = shlex.split(args[index + 1], posix=True)
+                        split = shlex.split(source, posix=True)
                     except ValueError:
                         return []
-                    return _unwrap_execution_prefix(split + args[index + 2 :])
+                    return _unwrap_execution_prefix(split + args[index + consumed :])
                 if arg.startswith(("--unset=", "--chdir=")) or (
                     arg.startswith("-u") and len(arg) > 2
                 ):

@@ -80,6 +80,25 @@ class CommandInspectionTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertBlocked(command)
 
+    def test_env_attached_split_string_forms(self) -> None:
+        for command in (
+            "env --split-string='rm -rf /tmp/build'",
+            "env -S'rm -rf /tmp/build'",
+            "env --split-string='git push --force origin main'",
+            "env -S\"sh -c 'DROP TABLE users'\"",
+        ):
+            with self.subTest(command=command):
+                self.assertBlocked(command)
+
+        for command in (
+            "env --split-string='echo safe'",
+            "env -S'printf %s harmless'",
+            "env --split-string=echo 'rm -rf /tmp/build'",
+            "echo \"env --split-string='rm -rf /tmp/build'\"",
+        ):
+            with self.subTest(command=command):
+                self.assertAllowed(command)
+
     def test_command_arguments_are_not_mistaken_for_executed_commands(self) -> None:
         for command in (
             "echo rm -rf /tmp/build",
