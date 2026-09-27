@@ -1,5 +1,7 @@
 # Weekly GitHub development summary
 
+**Started:** 2026-09-26
+
 An importable n8n workflow that reports a repository's activity over the previous seven days: commits, closed issues (excluding pull requests), and merged pull requests. It uses public GitHub REST endpoints and the Anthropic Messages API to write the summary in English or French. Discord and Slack incoming webhooks are supported.
 
 ## Setup and run
