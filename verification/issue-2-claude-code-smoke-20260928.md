@@ -1,6 +1,7 @@
 # Claude Code greenfield comprehension check
 
-- Project `started_at`: `2026-09-27` (see the local `project.json`).
+- Submission project `started_at`: `2026-09-27` (first local review and implementation day, recorded in the local project ledger).
+- Fresh test fixture `started_at`: `2026-09-28`.
 - Verification run: `2026-09-28` (Asia/Shanghai).
 - Fixture: fresh TypeScript App Router scaffold from `create-next-app@15.5.26`; the template was copied unchanged to its root.
 - Template SHA-256: `773d9cfc8896a6bc334f70f89b6eb9a2c26517b5a582c01146c21955a31d248a`.
