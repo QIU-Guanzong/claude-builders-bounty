@@ -29,6 +29,18 @@ def git(repo: Path, *args: str) -> None:
     )
 
 
+def git_output(repo: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
 def commit(repo: Path, name: str, subject: str) -> None:
     (repo / name).write_text(subject + "\n", encoding="utf-8")
     git(repo, "add", name)
@@ -75,13 +87,20 @@ class GitHistoryTests(unittest.TestCase):
             git(repo, "tag", "-a", "v1.0.0", "-m", "v1.0.0")
             commit(repo, "fix.txt", "fix(api): handle empty input")
             commit(repo, "remove.txt", "remove legacy endpoint")
+            main_branch = git_output(repo, "branch", "--show-current")
+            git(repo, "switch", "-c", "feature")
+            commit(repo, "feature.txt", "feat: add feature branch support")
+            git(repo, "switch", main_branch)
+            git(repo, "merge", "--no-ff", "--no-edit", "feature")
 
             output = generate_changelog(repo)
             self.assertIn("### Fixed", output)
             self.assertIn("handle empty input", output)
+            self.assertIn("### Added", output)
+            self.assertIn("feature branch support", output)
             self.assertIn("### Removed", output)
+            self.assertNotIn("Merge branch", output)
             self.assertNotIn("before release", output)
-            self.assertNotIn("### Added", output)
 
     def test_no_tag_uses_available_history_and_unknown_subjects_are_changed(
         self,
